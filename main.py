@@ -1,10 +1,11 @@
 from fastapi import FastAPI
 from app.database import get_connection
-from app.routes import auth
+from app.routes import auth, prescriptions
 
 app = FastAPI()
 
 app.include_router(auth.router, prefix="/auth", tags=["Autenticação"])
+app.include_router(prescriptions.router, prefix="/prescriptions", tags=["Prescrições"])
 
 @app.get("/")
 def root():
