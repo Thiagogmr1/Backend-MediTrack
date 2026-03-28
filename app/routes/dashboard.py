@@ -161,7 +161,7 @@ def get_patient_dashboard(patient_id: int):
         weekly_adherence = []
         for row in weekly_rows:
             weekly_adherence.append({
-                "week": str(row[0]),
+                "week": str(row[0])[:10],  # Apenas a data (YYYY-MM-DD)
                 "total_doses": row[1],
                 "taken_doses": row[2],
                 "adherence": float(row[3]) if row[3] else 0
