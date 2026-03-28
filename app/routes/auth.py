@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from typing import Optional
 from app.database import get_connection
 from app.auth import hash_password, verify_password, create_access_token
 
@@ -10,6 +11,7 @@ class UserRegister(BaseModel):
     email: str
     password: str
     role: str
+    birth_date: Optional[str] = None
 
 class UserLogin(BaseModel):
     email: str
@@ -28,8 +30,8 @@ def register(user: UserRegister):
         hashed = hash_password(user.password)
 
         cursor.execute(
-            "INSERT INTO users (name, email, password, role) VALUES (%s, %s, %s, %s) RETURNING id",
-            (user.name, user.email, hashed, user.role)
+            "INSERT INTO users (name, email, password, role, birth_date) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (user.name, user.email, hashed, user.role, user.birth_date)
         )
         user_id = cursor.fetchone()[0]
         conn.commit()
