@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List, Optional
 from app.database import get_connection
+from app.auth import require_role
 
 router = APIRouter()
 
@@ -23,7 +24,7 @@ class PrescriptionCreate(BaseModel):
     notes: Optional[str] = None
     medications: List[MedicationCreate]
 
-@router.post("/")
+@router.post("/", dependencies=[Depends(require_role("doctor"))])
 def create_prescription(prescription: PrescriptionCreate):
     conn = get_connection()
     cursor = conn.cursor()
