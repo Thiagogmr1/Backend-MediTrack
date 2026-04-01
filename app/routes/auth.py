@@ -16,6 +16,7 @@ class PatientRegister(BaseModel):
     name: str
     cpf: str
     birth_date: str
+    phone: Optional[str] = None
 
 class DoctorLogin(BaseModel):
     email: str
@@ -66,8 +67,8 @@ def register_patient(user: PatientRegister):
             raise HTTPException(status_code=400, detail="CPF já cadastrado")
 
         cursor.execute(
-            "INSERT INTO users (name, cpf, birth_date, role) VALUES (%s, %s, %s, %s) RETURNING id",
-            (user.name, user.cpf, user.birth_date, "patient")
+            "INSERT INTO users (name, cpf, birth_date, phone, role) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (user.name, user.cpf, user.birth_date, user.phone, "patient")
         )
         user_id = cursor.fetchone()[0]
         conn.commit()

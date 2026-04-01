@@ -94,12 +94,17 @@ def get_patient_dashboard(patient_id: int):
             SELECT
                 COUNT(d.id) AS total_doses,
                 COUNT(dl.id) AS taken_doses,
-                ROUND(COUNT(dl.id) * 100.0 / NULLIF(COUNT(d.id), 0), 2) AS adherence
+                ROUND(COUNT(dl.id) * 100.0 / NULLIF(COUNT(d.id), 0), 2) AS adherence,
+                u.name,
+                u.phone,
+                DATE_PART('year', AGE(u.birth_date)) AS age
             FROM doses d
             JOIN medications m ON m.id = d.medication_id
             JOIN prescriptions p ON p.id = m.prescription_id
+            JOIN users u ON u.id = p.patient_id
             LEFT JOIN dose_logs dl ON dl.dose_id = d.id AND dl.patient_id = %s
             WHERE p.patient_id = %s
+            GROUP BY u.name, u.phone, u.birth_date
         """, (patient_id, patient_id))
         general = cursor.fetchone()
 
@@ -169,6 +174,9 @@ def get_patient_dashboard(patient_id: int):
             })
 
         return {
+            "patient_name": general[3],
+            "patient_phone": general[4],
+            "patient_age": int(general[5]) if general[5] else None,
             "total_doses": general[0],
             "taken_doses": general[1],
             "general_adherence": float(general[2]) if general[2] else 0,
