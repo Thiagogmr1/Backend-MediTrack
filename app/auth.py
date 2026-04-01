@@ -65,9 +65,3 @@ def require_role(role: str):
 # | `create_access_token` | Gera o token JWT após o login |
 # | `decode_access_token` | Valida e lê o token JWT |
 # | `ACCESS_TOKEN_EXPIRE_MINUTES` | Token expira em 24 horas |
-
-
-
-# ⚠️ Precisamos adicionar a `SECRET_KEY` no arquivo `.env`. Abre o `.env` e adiciona essa linha:
-
-# SECRET_KEY=uma_chave_secreta_bem_longa_e_aleatoria_aqui
