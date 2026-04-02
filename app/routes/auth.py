@@ -6,6 +6,10 @@ from app.auth import hash_password, verify_password, create_access_token
 
 router = APIRouter()
 
+# -------------------------
+# MODELS
+# -------------------------
+
 class DoctorRegister(BaseModel):
     name: str
     email: str
@@ -17,6 +21,7 @@ class PatientRegister(BaseModel):
     cpf: str
     birth_date: str
     phone: Optional[str] = None
+    doctor_id: Optional[int] = None 
 
 class DoctorLogin(BaseModel):
     email: str
@@ -25,6 +30,10 @@ class DoctorLogin(BaseModel):
 class PatientLogin(BaseModel):
     cpf: str
     birth_date: str
+
+# -------------------------
+# REGISTER DOCTOR
+# -------------------------
 
 @router.post("/register/doctor")
 def register_doctor(user: DoctorRegister):
@@ -43,8 +52,15 @@ def register_doctor(user: DoctorRegister):
             (user.name, user.email, hashed, "doctor", user.birth_date)
         )
         user_id = cursor.fetchone()[0]
-        conn.commit()
 
+        # Se já tiver paciente associado
+        if user.doctor_id:
+            cursor.execute(
+                "INSERT INTO doctor_patients (doctor_id, patient_id) VALUES (%s, %s)",
+                (user.doctor_id, user_id)
+            )
+
+        conn.commit()
         return {"message": "Médico cadastrado com sucesso!", "user_id": user_id}
 
     except HTTPException as e:
@@ -55,6 +71,10 @@ def register_doctor(user: DoctorRegister):
     finally:
         cursor.close()
         conn.close()
+
+# -------------------------
+# REGISTER PATIENT
+# -------------------------
 
 @router.post("/register/patient")
 def register_patient(user: PatientRegister):
@@ -71,8 +91,15 @@ def register_patient(user: PatientRegister):
             (user.name, user.cpf, user.birth_date, user.phone, "patient")
         )
         user_id = cursor.fetchone()[0]
-        conn.commit()
 
+        # Se tiver doctor_id, cria relação
+        if user.doctor_id:
+            cursor.execute(
+                "INSERT INTO doctor_patients (doctor_id, patient_id) VALUES (%s, %s)",
+                (user.doctor_id, user_id)
+            )
+
+        conn.commit()
         return {"message": "Paciente cadastrado com sucesso!", "user_id": user_id}
 
     except HTTPException as e:
@@ -83,6 +110,10 @@ def register_patient(user: PatientRegister):
     finally:
         cursor.close()
         conn.close()
+
+# -------------------------
+# LOGIN DOCTOR
+# -------------------------
 
 @router.post("/login/doctor")
 def login_doctor(user: DoctorLogin):
@@ -117,6 +148,10 @@ def login_doctor(user: DoctorLogin):
         cursor.close()
         conn.close()
 
+# -------------------------
+# LOGIN PATIENT
+# -------------------------
+
 @router.post("/login/patient")
 def login_patient(user: PatientLogin):
     conn = get_connection()
@@ -146,6 +181,38 @@ def login_patient(user: PatientLogin):
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
+# -------------------------
+# GET PATIENT PROFILE
+# -------------------------
+
+@router.get("/profile/{user_id}")
+def get_patient_profile(user_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT name, cpf, phone, birth_date
+            FROM users
+            WHERE id = %s AND role = 'patient'
+        """, (user_id,))
+
+        row = cursor.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Paciente não encontrado")
+
+        return {
+            "name": row[0],
+            "cpf": row[1],
+            "phone": row[2],
+            "birth_date": str(row[3])
+        }
+
     finally:
         cursor.close()
         conn.close()
