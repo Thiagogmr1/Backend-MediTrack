@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from app.auth import require_role
+from app.auth import get_current_user, require_role
 from app.database import get_connection
 from datetime import date
 
@@ -83,7 +83,7 @@ def get_dashboard_overview(doctor_id: int):
         conn.close()
 
 
-@router.get("/patient/{patient_id}", dependencies=[Depends(require_role("doctor"))])
+@router.get("/patient/{patient_id}", dependencies=[Depends(get_current_user)])
 def get_patient_dashboard(patient_id: int):
     conn = get_connection()
     cursor = conn.cursor()

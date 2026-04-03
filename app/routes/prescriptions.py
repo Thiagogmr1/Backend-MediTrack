@@ -89,24 +89,23 @@ def create_prescription(prescription: PrescriptionCreate):
 # -------------------------
 
 @router.get("/patient/{patient_id}", dependencies=[Depends(require_role("patient"))])
-def get_patient_prescriptions(patient_id: int):
-
+def get_patient_medications(patient_id: int):
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute("""
             SELECT
-                m.id,
+                m.id AS medication_id,
                 m.name,
                 m.dosage,
                 m.indication,
                 m.notes,
                 m.start_date,
                 m.end_date,
-                array_agg(ms.scheduled_time ORDER BY ms.scheduled_time)
-            FROM prescriptions p
-            JOIN medications m ON m.prescription_id = p.id
+                ARRAY_AGG(ms.scheduled_time::text ORDER BY ms.scheduled_time) AS schedules
+            FROM medications m
+            JOIN prescriptions p ON p.id = m.prescription_id
             JOIN medication_schedules ms ON ms.medication_id = m.id
             WHERE p.patient_id = %s
             AND m.end_date >= CURRENT_DATE
@@ -117,7 +116,6 @@ def get_patient_prescriptions(patient_id: int):
         rows = cursor.fetchall()
 
         medications = []
-
         for row in rows:
             medications.append({
                 "medication_id": row[0],
@@ -127,14 +125,13 @@ def get_patient_prescriptions(patient_id: int):
                 "notes": row[4],
                 "start_date": str(row[5]),
                 "end_date": str(row[6]),
-                "schedules": [str(t) for t in row[7]],
+                "schedules": row[7]
             })
 
         return medications
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
     finally:
         cursor.close()
         conn.close()
