@@ -52,15 +52,8 @@ def register_doctor(user: DoctorRegister):
             (user.name, user.email, hashed, "doctor", user.birth_date)
         )
         user_id = cursor.fetchone()[0]
-
-        # Se já tiver paciente associado
-        if user.doctor_id:
-            cursor.execute(
-                "INSERT INTO doctor_patients (doctor_id, patient_id) VALUES (%s, %s)",
-                (user.doctor_id, user_id)
-            )
-
         conn.commit()
+
         return {"message": "Médico cadastrado com sucesso!", "user_id": user_id}
 
     except HTTPException as e:
