@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from typing import Optional
 from app.database import get_connection
 from app.auth import hash_password, verify_password, create_access_token
+from fastapi import Depends
+from app.auth import get_current_user
 
 router = APIRouter()
 
@@ -209,3 +211,7 @@ def get_patient_profile(user_id: int):
     finally:
         cursor.close()
         conn.close()
+
+@router.get("/me")
+def get_me(current_user: dict = Depends(get_current_user)):
+    return current_user
