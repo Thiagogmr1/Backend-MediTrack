@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import get_connection
-from app.routes import auth, prescriptions, doses, dashboard
-from app.routes import patients
+from app.routes import auth, prescriptions, doses, dashboard, patients, webhook
+from app.scheduler import start_scheduler
 
 app = FastAPI()
 
@@ -18,7 +18,12 @@ app.include_router(auth.router, prefix="/auth", tags=["Autenticação"])
 app.include_router(prescriptions.router, prefix="/prescriptions", tags=["Prescrições"])
 app.include_router(doses.router, prefix="/doses", tags=["Doses"])
 app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
-app.include_router(patients.router, prefix="/patients", tags=["patients"])
+app.include_router(patients.router, prefix="/patients", tags=["Pacientes"])
+app.include_router(webhook.router, prefix="/webhook", tags=["Webhook"])
+
+@app.on_event("startup")
+def startup_event():
+    start_scheduler()
 
 @app.get("/")
 def root():

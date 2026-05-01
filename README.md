@@ -1,2 +1,3 @@
 # Meditrack
-> Status: Concluído ✅ | Com autenticação de pacientes e médicos.
+> Status: Concluído ✅ | Recebimento e envio de notificações implementado com sucesso!"
+
