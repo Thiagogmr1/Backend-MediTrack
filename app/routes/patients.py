@@ -8,7 +8,7 @@ router = APIRouter()
 def get_patients_by_doctor(doctor_id: int):
     conn = get_connection()
     cursor = conn.cursor()
-    try:
+    try:  
         cursor.execute("""
             SELECT u.id, u.name, u.cpf, u.birth_date, u.phone
             FROM users u
