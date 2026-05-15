@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Request
 from app.database import get_connection
-from datetime import datetime
 
 router = APIRouter()
 
@@ -10,10 +9,19 @@ async def whatsapp_webhook(request: Request):
     
     phone = str(form_data.get("From", "")).replace("whatsapp:+55", "").replace("whatsapp:+", "")
     message = str(form_data.get("Body", "")).strip().lower()
+    button_payload = str(form_data.get("ButtonPayload", "")).strip().lower()
 
-    print(f"[Webhook] Mensagem recebida de {phone}: {message}")
+    # Normaliza de 10 para 11 dígitos adicionando o 9 após o DDD
+    if len(phone) == 10:
+        phone = phone[:2] + '9' + phone[2:]
 
-    if "tomei" not in message:
+    response_text = button_payload if button_payload else message
+
+    print(f"[Webhook] Telefone normalizado: {phone}")
+    print(f"[Webhook] Mensagem: '{message}' | Payload: '{button_payload}'")
+
+    if "tomei" not in response_text:
+        print(f"[Webhook] Resposta ignorada: {response_text}")
         return {"status": "ignored"}
 
     conn = get_connection()
@@ -56,8 +64,7 @@ async def whatsapp_webhook(request: Request):
             WHERE d.id = %s
         """, (dose_id,))
 
-        patient_row = cursor.fetchone()
-        patient_id = patient_row[0]
+        patient_id = cursor.fetchone()[0]
 
         # Registra a dose como tomada
         cursor.execute(

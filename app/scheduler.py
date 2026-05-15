@@ -11,10 +11,10 @@ def check_and_send_reminders():
 
     try:
         now = datetime.now()
-        target_time = (now + timedelta(minutes=2)).strftime("%H:%M")
-        print(f"[Scheduler] Horário do Python: {now} — Target: {target_time}")
-
-        print(f"[Scheduler] Verificando doses para o horário: {target_time}")
+        # Janela de 1 minuto para frente
+        window_start = (now + timedelta(minutes=1)).strftime("%H:%M")
+        window_end = (now + timedelta(minutes=2)).strftime("%H:%M")
+        print(f"[Scheduler] Horário do Python: {now} — Janela: {window_start} a {window_end}")
 
         cursor.execute("""
             SELECT
@@ -30,21 +30,17 @@ def check_and_send_reminders():
             JOIN users u ON u.id = p.patient_id
             WHERE d.scheduled_date = CURRENT_DATE
             AND d.reminder_sent = FALSE
-            AND TO_CHAR(ms.scheduled_time, 'HH24:MI') = %s
+            AND TO_CHAR(ms.scheduled_time, 'HH24:MI') BETWEEN %s AND %s
             AND u.phone IS NOT NULL
-        """, (target_time,))
+        """, (window_start, window_end))
 
         rows = cursor.fetchall()
         print(f"[Scheduler] Doses encontradas: {len(rows)}")
 
         for row in rows:
-            dose_id = row[0]
-            phone = row[1]
-            medication_name = row[2]
-            dosage = row[3]
+            dose_id, phone, medication_name, dosage, _ = row
 
             print(f"[Scheduler] Enviando para {phone} — {medication_name}")
-
             success = send_reminder(phone, medication_name, dosage)
 
             if success:

@@ -184,34 +184,25 @@ def login_patient(user: PatientLogin):
 # GET PATIENT PROFILE
 # -------------------------
 
-@router.get("/profile/{user_id}")
-def get_patient_profile(user_id: int):
+@router.get("/me")
+def get_me(current_user: dict = Depends(get_current_user)):
     conn = get_connection()
     cursor = conn.cursor()
-
     try:
-        cursor.execute("""
-            SELECT name, cpf, phone, birth_date
-            FROM users
-            WHERE id = %s AND role = 'patient'
-        """, (user_id,))
-
+        user_id = int(current_user.get("sub"))
+        cursor.execute("SELECT id, name, role FROM users WHERE id = %s", (user_id,))
         row = cursor.fetchone()
-
         if not row:
-            raise HTTPException(status_code=404, detail="Paciente não encontrado")
-
+            raise HTTPException(status_code=404, detail="Usuário não encontrado")
         return {
-            "name": row[0],
-            "cpf": row[1],
-            "phone": row[2],
-            "birth_date": str(row[3])
+            "user_id": row[0],
+            "name": row[1],
+            "role": row[2]
         }
-
     finally:
         cursor.close()
         conn.close()
-
+        
 @router.get("/me")
 def get_me(current_user: dict = Depends(get_current_user)):
     return current_user
