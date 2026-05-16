@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
@@ -9,6 +9,9 @@ import os
 load_dotenv()
 
 SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY não definida nas variáveis de ambiente")
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 
@@ -23,7 +26,7 @@ def verify_password(plain_password: str, hashed_password: str):
 
 def create_access_token(data: dict):
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -33,7 +36,7 @@ def decode_access_token(token: str):
         return payload
     except JWTError:
         return None
-    
+
 def get_current_user(token: str = Depends(oauth2_scheme)):
     payload = decode_access_token(token)
     if payload is None:
@@ -53,15 +56,3 @@ def require_role(role: str):
             )
         return current_user
     return role_checker
-
-
-# ## 🧠 Entendendo o código:
-
-# | Parte | O que faz |
-# |-------|-----------|
-# | `SECRET_KEY` | Chave secreta para assinar os tokens JWT |
-# | `hash_password` | Criptografa a senha antes de salvar no banco |
-# | `verify_password` | Compara a senha digitada com a senha criptografada |
-# | `create_access_token` | Gera o token JWT após o login |
-# | `decode_access_token` | Valida e lê o token JWT |
-# | `ACCESS_TOKEN_EXPIRE_MINUTES` | Token expira em 24 horas |

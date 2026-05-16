@@ -1,10 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from app.database import get_connection
-from app.auth import hash_password, verify_password, create_access_token
-from fastapi import Depends
-from app.auth import get_current_user
+from app.auth import hash_password, verify_password, create_access_token, get_current_user
 
 router = APIRouter()
 
@@ -23,7 +21,7 @@ class PatientRegister(BaseModel):
     cpf: str
     birth_date: str
     phone: Optional[str] = None
-    doctor_id: Optional[int] = None 
+    doctor_id: Optional[int] = None
 
 class DoctorLogin(BaseModel):
     email: str
@@ -41,28 +39,25 @@ class PatientLogin(BaseModel):
 def register_doctor(user: DoctorRegister):
     conn = get_connection()
     cursor = conn.cursor()
-
     try:
         cursor.execute("SELECT id FROM users WHERE email = %s", (user.email,))
         if cursor.fetchone():
             raise HTTPException(status_code=400, detail="Email já cadastrado")
 
         hashed = hash_password(user.password)
-
         cursor.execute(
             "INSERT INTO users (name, email, password, role, birth_date) VALUES (%s, %s, %s, %s, %s) RETURNING id",
             (user.name, user.email, hashed, "doctor", user.birth_date)
         )
         user_id = cursor.fetchone()[0]
         conn.commit()
-
         return {"message": "Médico cadastrado com sucesso!", "user_id": user_id}
 
-    except HTTPException as e:
-        raise e
-    except Exception as e:
+    except HTTPException:
+        raise
+    except Exception:
         conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
     finally:
         cursor.close()
         conn.close()
@@ -75,7 +70,6 @@ def register_doctor(user: DoctorRegister):
 def register_patient(user: PatientRegister):
     conn = get_connection()
     cursor = conn.cursor()
-
     try:
         cursor.execute("SELECT id FROM users WHERE cpf = %s", (user.cpf,))
         if cursor.fetchone():
@@ -87,7 +81,6 @@ def register_patient(user: PatientRegister):
         )
         user_id = cursor.fetchone()[0]
 
-        # Se tiver doctor_id, cria relação
         if user.doctor_id:
             cursor.execute(
                 "INSERT INTO doctor_patients (doctor_id, patient_id) VALUES (%s, %s)",
@@ -97,11 +90,11 @@ def register_patient(user: PatientRegister):
         conn.commit()
         return {"message": "Paciente cadastrado com sucesso!", "user_id": user_id}
 
-    except HTTPException as e:
-        raise e
-    except Exception as e:
+    except HTTPException:
+        raise
+    except Exception:
         conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
     finally:
         cursor.close()
         conn.close()
@@ -114,31 +107,29 @@ def register_patient(user: PatientRegister):
 def login_doctor(user: DoctorLogin):
     conn = get_connection()
     cursor = conn.cursor()
-
     try:
-        cursor.execute("SELECT id, name, password, role FROM users WHERE email = %s AND role = 'doctor'", (user.email,))
+        cursor.execute(
+            "SELECT id, name, password, role FROM users WHERE email = %s AND role = 'doctor'",
+            (user.email,)
+        )
         db_user = cursor.fetchone()
 
-        if not db_user:
-            raise HTTPException(status_code=401, detail="Email ou senha incorretos")
-
-        if not verify_password(user.password, db_user[2]):
+        if not db_user or not verify_password(user.password, db_user[2]):
             raise HTTPException(status_code=401, detail="Email ou senha incorretos")
 
         token = create_access_token({"sub": str(db_user[0]), "role": db_user[3]})
-
         return {
             "access_token": token,
             "token_type": "bearer",
             "user_id": db_user[0],
             "name": db_user[1],
-            "role": db_user[3]
+            "role": db_user[3],
         }
 
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
     finally:
         cursor.close()
         conn.close()
@@ -151,7 +142,6 @@ def login_doctor(user: DoctorLogin):
 def login_patient(user: PatientLogin):
     conn = get_connection()
     cursor = conn.cursor()
-
     try:
         cursor.execute(
             "SELECT id, name, role FROM users WHERE cpf = %s AND birth_date = %s AND role = 'patient'",
@@ -163,25 +153,24 @@ def login_patient(user: PatientLogin):
             raise HTTPException(status_code=401, detail="CPF ou data de nascimento incorretos")
 
         token = create_access_token({"sub": str(db_user[0]), "role": db_user[2]})
-
         return {
             "access_token": token,
             "token_type": "bearer",
             "user_id": db_user[0],
             "name": db_user[1],
-            "role": db_user[2]
+            "role": db_user[2],
         }
 
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
     finally:
         cursor.close()
         conn.close()
 
 # -------------------------
-# GET PATIENT PROFILE
+# GET CURRENT USER
 # -------------------------
 
 @router.get("/me")
@@ -197,12 +186,8 @@ def get_me(current_user: dict = Depends(get_current_user)):
         return {
             "user_id": row[0],
             "name": row[1],
-            "role": row[2]
+            "role": row[2],
         }
     finally:
         cursor.close()
         conn.close()
-        
-@router.get("/me")
-def get_me(current_user: dict = Depends(get_current_user)):
-    return current_user

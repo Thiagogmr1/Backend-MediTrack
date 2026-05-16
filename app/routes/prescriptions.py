@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List, Optional
 from app.database import get_connection
-from app.auth import require_role
+from app.auth import require_role, get_current_user
 
 router = APIRouter()
 
@@ -32,17 +32,18 @@ class PrescriptionCreate(BaseModel):
 # CREATE PRESCRIPTION
 # -------------------------
 
-@router.post("/", dependencies=[Depends(require_role("doctor"))])
-def create_prescription(prescription: PrescriptionCreate):
+@router.post("/")
+def create_prescription(prescription: PrescriptionCreate, current_user: dict = Depends(require_role("doctor"))):
+    if int(current_user.get("sub")) != prescription.doctor_id:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
     conn = get_connection()
     cursor = conn.cursor()
-
     try:
         cursor.execute(
             "INSERT INTO prescriptions (doctor_id, patient_id, notes) VALUES (%s, %s, %s) RETURNING id",
             (prescription.doctor_id, prescription.patient_id, prescription.notes)
         )
-
         prescription_id = cursor.fetchone()[0]
 
         for med in prescription.medications:
@@ -52,7 +53,6 @@ def create_prescription(prescription: PrescriptionCreate):
                 VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
                 (prescription_id, med.name, med.dosage, med.indication, med.notes, med.start_date, med.end_date)
             )
-
             medication_id = cursor.fetchone()[0]
 
             for schedule in med.schedules:
@@ -60,7 +60,6 @@ def create_prescription(prescription: PrescriptionCreate):
                     "INSERT INTO medication_schedules (medication_id, scheduled_time) VALUES (%s, %s) RETURNING id",
                     (medication_id, schedule.scheduled_time)
                 )
-
                 schedule_id = cursor.fetchone()[0]
 
                 cursor.execute(
@@ -70,16 +69,13 @@ def create_prescription(prescription: PrescriptionCreate):
                 )
 
         conn.commit()
+        return {"message": "Prescrição criada com sucesso", "prescription_id": prescription_id}
 
-        return {
-            "message": "Prescrição criada com sucesso",
-            "prescription_id": prescription_id
-        }
-
-    except Exception as e:
+    except HTTPException:
+        raise
+    except Exception:
         conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
     finally:
         cursor.close()
         conn.close()
@@ -88,11 +84,13 @@ def create_prescription(prescription: PrescriptionCreate):
 # GET PATIENT MEDICATIONS
 # -------------------------
 
-@router.get("/patient/{patient_id}", dependencies=[Depends(require_role("patient"))])
-def get_patient_medications(patient_id: int):
+@router.get("/patient/{patient_id}")
+def get_patient_medications(patient_id: int, current_user: dict = Depends(get_current_user)):
+    if int(current_user.get("sub")) != patient_id:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
     conn = get_connection()
     cursor = conn.cursor()
-
     try:
         cursor.execute("""
             SELECT
@@ -114,10 +112,8 @@ def get_patient_medications(patient_id: int):
         """, (patient_id,))
 
         rows = cursor.fetchall()
-
-        medications = []
-        for row in rows:
-            medications.append({
+        return [
+            {
                 "medication_id": row[0],
                 "name": row[1],
                 "dosage": row[2],
@@ -126,12 +122,14 @@ def get_patient_medications(patient_id: int):
                 "start_date": str(row[5]),
                 "end_date": str(row[6]),
                 "schedules": row[7]
-            })
+            }
+            for row in rows
+        ]
 
-        return medications
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
     finally:
         cursor.close()
         conn.close()

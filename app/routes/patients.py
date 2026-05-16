@@ -4,11 +4,14 @@ from app.auth import require_role
 
 router = APIRouter()
 
-@router.get("/doctor/{doctor_id}", dependencies=[Depends(require_role("doctor"))])
-def get_patients_by_doctor(doctor_id: int):
+@router.get("/doctor/{doctor_id}")
+def get_patients_by_doctor(doctor_id: int, current_user: dict = Depends(require_role("doctor"))):
+    if int(current_user.get("sub")) != doctor_id:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
     conn = get_connection()
     cursor = conn.cursor()
-    try:  
+    try:
         cursor.execute("""
             SELECT u.id, u.name, u.cpf, u.birth_date, u.phone
             FROM users u
@@ -22,8 +25,10 @@ def get_patients_by_doctor(doctor_id: int):
              "birth_date": str(r[3]), "phone": r[4]}
             for r in rows
         ]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
     finally:
         cursor.close()
         conn.close()

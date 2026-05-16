@@ -1,8 +1,10 @@
+import logging
+from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.database import get_connection
 from app.services.whatsapp import send_reminder
-from datetime import datetime, timedelta
 
+logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler()
 
 def check_and_send_reminders():
@@ -11,10 +13,9 @@ def check_and_send_reminders():
 
     try:
         now = datetime.now()
-        # Janela de 1 minuto para frente
         window_start = (now + timedelta(minutes=1)).strftime("%H:%M")
         window_end = (now + timedelta(minutes=2)).strftime("%H:%M")
-        print(f"[Scheduler] Horário do Python: {now} — Janela: {window_start} a {window_end}")
+        logger.info(f"[Scheduler] Horário: {now} — Janela: {window_start} a {window_end}")
 
         cursor.execute("""
             SELECT
@@ -35,12 +36,11 @@ def check_and_send_reminders():
         """, (window_start, window_end))
 
         rows = cursor.fetchall()
-        print(f"[Scheduler] Doses encontradas: {len(rows)}")
+        logger.info(f"[Scheduler] Doses encontradas: {len(rows)}")
 
         for row in rows:
             dose_id, phone, medication_name, dosage, _ = row
-
-            print(f"[Scheduler] Enviando para {phone} — {medication_name}")
+            logger.info(f"[Scheduler] Enviando para {phone} — {medication_name}")
             success = send_reminder(phone, medication_name, dosage)
 
             if success:
@@ -49,10 +49,10 @@ def check_and_send_reminders():
                     (dose_id,)
                 )
                 conn.commit()
-                print(f"[Scheduler] Lembrete enviado para {phone} — {medication_name}")
+                logger.info(f"[Scheduler] Lembrete enviado para {phone} — {medication_name}")
 
     except Exception as e:
-        print(f"[Scheduler] Erro: {e}")
+        logger.error(f"[Scheduler] Erro: {e}")
         conn.rollback()
     finally:
         cursor.close()
@@ -61,4 +61,4 @@ def check_and_send_reminders():
 def start_scheduler():
     scheduler.add_job(check_and_send_reminders, "interval", minutes=1)
     scheduler.start()
-    print("[Scheduler] Agendador iniciado!")
+    logger.info("[Scheduler] Agendador iniciado!")
