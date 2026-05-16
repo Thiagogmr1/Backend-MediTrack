@@ -1,17 +1,17 @@
 from fastapi import APIRouter, HTTPException, Depends
 from app.auth import get_current_user, require_role
 from app.database import get_connection
-from datetime import date
 
 router = APIRouter()
 
-@router.get("/overview/{doctor_id}", dependencies=[Depends(require_role("doctor"))])
-def get_dashboard_overview(doctor_id: int):
+@router.get("/overview/{doctor_id}")
+def get_dashboard_overview(doctor_id: int, current_user: dict = Depends(require_role("doctor"))):
+    if int(current_user.get("sub")) != doctor_id:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
     conn = get_connection()
     cursor = conn.cursor()
-
     try:
-        # Total de pacientes
         cursor.execute("""
             SELECT COUNT(DISTINCT patient_id) 
             FROM prescriptions 
@@ -19,7 +19,6 @@ def get_dashboard_overview(doctor_id: int):
         """, (doctor_id,))
         total_patients = cursor.fetchone()[0]
 
-        # Adesão por paciente
         cursor.execute("""
             SELECT
                 u.id,
@@ -39,7 +38,6 @@ def get_dashboard_overview(doctor_id: int):
         """, (doctor_id,))
 
         rows = cursor.fetchall()
-
         patients = []
         high_adherence = 0
         low_adherence = 0
@@ -48,12 +46,10 @@ def get_dashboard_overview(doctor_id: int):
         for row in rows:
             adherence = float(row[6]) if row[6] else 0
             total_adherence += adherence
-
             if adherence >= 80:
                 high_adherence += 1
             else:
                 low_adherence += 1
-
             patients.append({
                 "patient_id": row[0],
                 "name": row[1],
@@ -76,20 +72,36 @@ def get_dashboard_overview(doctor_id: int):
             "patients": patients
         }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
     finally:
         cursor.close()
         conn.close()
 
 
-@router.get("/patient/{patient_id}", dependencies=[Depends(get_current_user)])
-def get_patient_dashboard(patient_id: int):
+@router.get("/patient/{patient_id}")
+def get_patient_dashboard(patient_id: int, current_user: dict = Depends(get_current_user)):
+    role = current_user.get("role")
+    user_id = int(current_user.get("sub"))
+
     conn = get_connection()
     cursor = conn.cursor()
-
     try:
-        # Adesão geral
+        # Paciente só acessa os próprios dados
+        if role == "patient" and user_id != patient_id:
+            raise HTTPException(status_code=403, detail="Acesso negado")
+
+        # Médico só acessa pacientes vinculados a ele
+        if role == "doctor":
+            cursor.execute("""
+                SELECT 1 FROM doctor_patients
+                WHERE doctor_id = %s AND patient_id = %s
+            """, (user_id, patient_id))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=403, detail="Acesso negado")
+
         cursor.execute("""
             SELECT
                 COUNT(d.id) AS total_doses,
@@ -108,10 +120,11 @@ def get_patient_dashboard(patient_id: int):
         """, (patient_id, patient_id))
         general = cursor.fetchone()
 
-        # Doses perdidas
+        if not general:
+            raise HTTPException(status_code=404, detail="Paciente sem dados de adesão")
+
         missed_doses = general[0] - general[1]
 
-        # Adesão dos últimos 30 dias (dia a dia)
         cursor.execute("""
             SELECT
                 d.scheduled_date,
@@ -145,7 +158,6 @@ def get_patient_dashboard(patient_id: int):
                 "adherence": adherence
             })
 
-        # Adesão semanal
         cursor.execute("""
             SELECT
                 DATE_TRUNC('week', d.scheduled_date) AS week,
@@ -164,14 +176,15 @@ def get_patient_dashboard(patient_id: int):
         """, (patient_id, patient_id))
         weekly_rows = cursor.fetchall()
 
-        weekly_adherence = []
-        for row in weekly_rows:
-            weekly_adherence.append({
-                "week": str(row[0])[:10],  # Apenas a data (YYYY-MM-DD)
+        weekly_adherence = [
+            {
+                "week": str(row[0])[:10],
                 "total_doses": row[1],
                 "taken_doses": row[2],
                 "adherence": float(row[3]) if row[3] else 0
-            })
+            }
+            for row in weekly_rows
+        ]
 
         return {
             "patient_name": general[3],
@@ -186,8 +199,10 @@ def get_patient_dashboard(patient_id: int):
             "weekly_adherence": weekly_adherence
         }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
     finally:
         cursor.close()
         conn.close()
