@@ -191,3 +191,34 @@ def get_me(current_user: dict = Depends(get_current_user)):
     finally:
         cursor.close()
         conn.close()
+
+# -------------------------
+# GET PATIENT PROFILE
+# -------------------------
+
+@router.get("/profile/{user_id}")
+def get_patient_profile(user_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT name, cpf, phone, birth_date
+            FROM users
+            WHERE id = %s AND role = 'patient'
+        """, (user_id,))
+
+        row = cursor.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Paciente não encontrado")
+
+        return {
+            "name": row[0],
+            "cpf": row[1],
+            "phone": row[2],
+            "birth_date": str(row[3])
+        }
+
+    finally:
+        cursor.close()
+        conn.close()
