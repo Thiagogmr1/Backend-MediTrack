@@ -1,10 +1,15 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from app.database import get_connection
 from app.routes import auth, prescriptions, doses, dashboard, patients, webhook
 from app.scheduler import start_scheduler
 from contextlib import asynccontextmanager
+
+limiter = Limiter(key_func=get_remote_address)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -12,6 +17,8 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 

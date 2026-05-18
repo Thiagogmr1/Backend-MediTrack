@@ -1,8 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 from app.database import get_connection
 from app.auth import hash_password, verify_password, create_access_token, get_current_user
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter()
 
@@ -104,7 +108,8 @@ def register_patient(user: PatientRegister):
 # -------------------------
 
 @router.post("/login/doctor")
-def login_doctor(user: DoctorLogin):
+@limiter.limit("5/minute")
+def login_doctor(request: Request, user: DoctorLogin):
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -139,7 +144,8 @@ def login_doctor(user: DoctorLogin):
 # -------------------------
 
 @router.post("/login/patient")
-def login_patient(user: PatientLogin):
+@limiter.limit("5/minute")
+def login_patient(request: Request, user: PatientLogin):
     conn = get_connection()
     cursor = conn.cursor()
     try:
