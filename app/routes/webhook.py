@@ -1,13 +1,27 @@
 import logging
-from fastapi import APIRouter, Request
+import os
+from fastapi import APIRouter, Request, HTTPException
+from twilio.request_validator import RequestValidator
 from app.database import get_connection
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+def validate_twilio_request(request: Request, form_data: dict) -> bool:
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+    validator = RequestValidator(auth_token)
+    signature = request.headers.get("X-Twilio-Signature", "")
+    url = str(request.url)
+    return validator.validate(url, dict(form_data), signature)
+
 @router.post("/whatsapp")
 async def whatsapp_webhook(request: Request):
     form_data = await request.form()
+
+    # Valida se a requisição veio da Twilio
+    if not validate_twilio_request(request, dict(form_data)):
+        logger.warning("[Webhook] Requisição inválida — não veio da Twilio")
+        raise HTTPException(status_code=403, detail="Requisição inválida")
 
     phone = str(form_data.get("From", "")).replace("whatsapp:+55", "").replace("whatsapp:+", "")
     message = str(form_data.get("Body", "")).strip().lower()
