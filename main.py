@@ -17,8 +17,6 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(lifespan=lifespan)
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 
@@ -29,6 +27,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.include_router(auth.router, prefix="/auth", tags=["Autenticação"])
 app.include_router(prescriptions.router, prefix="/prescriptions", tags=["Prescrições"])
