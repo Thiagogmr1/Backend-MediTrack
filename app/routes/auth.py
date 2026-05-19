@@ -1,79 +1,230 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from typing import Optional
 from app.database import get_connection
-from app.auth import hash_password, verify_password, create_access_token
+from app.auth import hash_password, verify_password, create_access_token, get_current_user
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter()
 
-class UserRegister(BaseModel):
+# -------------------------
+# MODELS
+# -------------------------
+
+class DoctorRegister(BaseModel):
     name: str
     email: str
     password: str
-    role: str
+    birth_date: Optional[str] = None
 
-class UserLogin(BaseModel):
+class PatientRegister(BaseModel):
+    name: str
+    cpf: str
+    birth_date: str
+    phone: Optional[str] = None
+    doctor_id: Optional[int] = None
+
+class DoctorLogin(BaseModel):
     email: str
     password: str
 
-@router.post("/register")
-def register(user: UserRegister):
+class PatientLogin(BaseModel):
+    cpf: str
+    birth_date: str
+
+# -------------------------
+# REGISTER DOCTOR
+# -------------------------
+
+@router.post("/register/doctor")
+def register_doctor(user: DoctorRegister):
     conn = get_connection()
     cursor = conn.cursor()
-
     try:
         cursor.execute("SELECT id FROM users WHERE email = %s", (user.email,))
         if cursor.fetchone():
             raise HTTPException(status_code=400, detail="Email já cadastrado")
 
         hashed = hash_password(user.password)
-
         cursor.execute(
-            "INSERT INTO users (name, email, password, role) VALUES (%s, %s, %s, %s) RETURNING id",
-            (user.name, user.email, hashed, user.role)
+            "INSERT INTO users (name, email, password, role, birth_date) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (user.name, user.email, hashed, "doctor", user.birth_date)
         )
         user_id = cursor.fetchone()[0]
         conn.commit()
+        return {"message": "Médico cadastrado com sucesso!", "user_id": user_id}
 
-        return {"message": "Usuário cadastrado com sucesso!", "user_id": user_id}
-
-    except HTTPException as e:
-        raise e
-    except Exception as e:
+    except HTTPException:
+        raise
+    except Exception:
         conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
     finally:
         cursor.close()
         conn.close()
 
-@router.post("/login")
-def login(user: UserLogin):
+# -------------------------
+# REGISTER PATIENT
+# -------------------------
+
+@router.post("/register/patient")
+def register_patient(user: PatientRegister):
     conn = get_connection()
     cursor = conn.cursor()
-
     try:
-        cursor.execute("SELECT id, name, password, role FROM users WHERE email = %s", (user.email,))
+        cursor.execute("SELECT id FROM users WHERE cpf = %s", (user.cpf,))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="CPF já cadastrado")
+
+        cursor.execute(
+            "INSERT INTO users (name, cpf, birth_date, phone, role) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (user.name, user.cpf, user.birth_date, user.phone, "patient")
+        )
+        user_id = cursor.fetchone()[0]
+
+        if user.doctor_id:
+            cursor.execute(
+                "INSERT INTO doctor_patients (doctor_id, patient_id) VALUES (%s, %s)",
+                (user.doctor_id, user_id)
+            )
+
+        conn.commit()
+        return {"message": "Paciente cadastrado com sucesso!", "user_id": user_id}
+
+    except HTTPException:
+        raise
+    except Exception:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
+    finally:
+        cursor.close()
+        conn.close()
+
+# -------------------------
+# LOGIN DOCTOR
+# -------------------------
+
+@router.post("/login/doctor")
+@limiter.limit("5/minute")
+def login_doctor(request: Request, user: DoctorLogin):
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT id, name, password, role FROM users WHERE email = %s AND role = 'doctor'",
+            (user.email,)
+        )
         db_user = cursor.fetchone()
 
-        if not db_user:
-            raise HTTPException(status_code=401, detail="Email ou senha incorretos")
-
-        if not verify_password(user.password, db_user[2]):
+        if not db_user or not verify_password(user.password, db_user[2]):
             raise HTTPException(status_code=401, detail="Email ou senha incorretos")
 
         token = create_access_token({"sub": str(db_user[0]), "role": db_user[3]})
-
         return {
             "access_token": token,
             "token_type": "bearer",
             "user_id": db_user[0],
             "name": db_user[1],
-            "role": db_user[3]
+            "role": db_user[3],
         }
 
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
+    finally:
+        cursor.close()
+        conn.close()
+
+# -------------------------
+# LOGIN PATIENT
+# -------------------------
+
+@router.post("/login/patient")
+@limiter.limit("5/minute")
+def login_patient(request: Request, user: PatientLogin):
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT id, name, role FROM users WHERE cpf = %s AND birth_date = %s AND role = 'patient'",
+            (user.cpf, user.birth_date)
+        )
+        db_user = cursor.fetchone()
+
+        if not db_user:
+            raise HTTPException(status_code=401, detail="CPF ou data de nascimento incorretos")
+
+        token = create_access_token({"sub": str(db_user[0]), "role": db_user[2]})
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "user_id": db_user[0],
+            "name": db_user[1],
+            "role": db_user[2],
+        }
+
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
+    finally:
+        cursor.close()
+        conn.close()
+
+# -------------------------
+# GET CURRENT USER
+# -------------------------
+
+@router.get("/me")
+def get_me(current_user: dict = Depends(get_current_user)):
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        user_id = int(current_user.get("sub"))
+        cursor.execute("SELECT id, name, role FROM users WHERE id = %s", (user_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado")
+        return {
+            "user_id": row[0],
+            "name": row[1],
+            "role": row[2],
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+# -------------------------
+# GET PATIENT PROFILE
+# -------------------------
+
+@router.get("/profile/{user_id}")
+def get_patient_profile(user_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT name, cpf, phone, birth_date
+            FROM users
+            WHERE id = %s AND role = 'patient'
+        """, (user_id,))
+
+        row = cursor.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Paciente não encontrado")
+
+        return {
+            "name": row[0],
+            "cpf": row[1],
+            "phone": row[2],
+            "birth_date": str(row[3])
+        }
+
     finally:
         cursor.close()
         conn.close()
