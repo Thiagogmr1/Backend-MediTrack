@@ -8,6 +8,13 @@ from app.routes import auth, prescriptions, doses, dashboard, patients, webhook
 from app.scheduler import start_scheduler
 from contextlib import asynccontextmanager
 
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+
 limiter = Limiter(key_func=get_remote_address)
 
 @asynccontextmanager
