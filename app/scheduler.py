@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.database import get_connection
 from app.services.whatsapp import send_reminder
@@ -14,8 +14,14 @@ def check_and_send_reminders():
 
     try:
         now = datetime.now(ZoneInfo("America/Sao_Paulo"))
-        window_start = (now + timedelta(minutes=1)).strftime("%H:%M")
-        window_end = (now + timedelta(minutes=2)).strftime("%H:%M")
+
+        # Usa a data de Brasília (evita bug após 21h quando Railway/Postgres já estão no dia seguinte em UTC)
+        today = now.strftime("%Y-%m-%d")
+
+        # Janela no passado recente com tolerância de 2 minutos para atrasos do scheduler
+        window_start = (now - timedelta(minutes=2)).strftime("%H:%M")
+        window_end   = now.strftime("%H:%M")
+
         logger.info(f"[Scheduler] Horário: {now} — Janela: {window_start} a {window_end}")
 
         cursor.execute("""
@@ -30,11 +36,11 @@ def check_and_send_reminders():
             JOIN medication_schedules ms ON ms.id = d.schedule_id
             JOIN prescriptions p ON p.id = m.prescription_id
             JOIN users u ON u.id = p.patient_id
-            WHERE d.scheduled_date = CURRENT_DATE
+            WHERE d.scheduled_date = %s
             AND d.reminder_sent = FALSE
             AND TO_CHAR(ms.scheduled_time, 'HH24:MI') BETWEEN %s AND %s
             AND u.phone IS NOT NULL
-        """, (window_start, window_end))
+        """, (today, window_start, window_end))
 
         rows = cursor.fetchall()
         logger.info(f"[Scheduler] Doses encontradas: {len(rows)}")
@@ -50,7 +56,7 @@ def check_and_send_reminders():
                     (dose_id,)
                 )
                 conn.commit()
-                logger.info(f"[Scheduler] Lembrete enviado para {phone} — {medication_name}")
+                logger.info(f"[Scheduler] Lembrete enviado — {phone} | {medication_name}")
 
     except Exception as e:
         logger.error(f"[Scheduler] Erro: {e}")

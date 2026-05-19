@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -15,9 +15,9 @@ async def lifespan(app: FastAPI):
     start_scheduler()
     yield
 
-# AJUSTE: redirect_slashes=True faz com que se a Twilio chamar /webhook/whatsapp/ 
-# o FastAPI trate internamente em vez de quebrar a requisição POST.
-app = FastAPI(lifespan=lifespan, redirect_slashes=True)
+app = FastAPI(lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 
@@ -29,12 +29,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-# REMOVIDO: O preflight_handler manual foi removido para evitar conflito de rotas.
-
-# Rotas do Sistema
 app.include_router(auth.router, prefix="/auth", tags=["Autenticação"])
 app.include_router(prescriptions.router, prefix="/prescriptions", tags=["Prescrições"])
 app.include_router(doses.router, prefix="/doses", tags=["Doses"])

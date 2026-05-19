@@ -11,11 +11,18 @@ def validate_twilio_request(request: Request, form_data: dict) -> bool:
     auth_token = os.getenv("TWILIO_AUTH_TOKEN")
     validator = RequestValidator(auth_token)
     signature = request.headers.get("X-Twilio-Signature", "")
+
+    # Corrige http → https para funcionar atrás do proxy do Railway
     url = str(request.url)
+    if url.startswith("http://"):
+        url = url.replace("http://", "https://", 1)
+
     return validator.validate(url, dict(form_data), signature)
 
 @router.post("/whatsapp")
 async def whatsapp_webhook(request: Request):
+    logger.info("[Webhook] POST recebido")  # log antes de qualquer validação
+
     form_data = await request.form()
 
     # Valida se a requisição veio da Twilio
