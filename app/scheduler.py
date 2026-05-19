@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.database import get_connection
 from app.services.whatsapp import send_reminder
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler()
@@ -12,7 +13,7 @@ def check_and_send_reminders():
     cursor = conn.cursor()
 
     try:
-        now = datetime.now()
+        now = datetime.now(ZoneInfo("America/Sao_Paulo"))
         window_start = (now + timedelta(minutes=1)).strftime("%H:%M")
         window_end = (now + timedelta(minutes=2)).strftime("%H:%M")
         logger.info(f"[Scheduler] Horário: {now} — Janela: {window_start} a {window_end}")
