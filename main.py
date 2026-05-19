@@ -15,7 +15,9 @@ async def lifespan(app: FastAPI):
     start_scheduler()
     yield
 
-app = FastAPI(lifespan=lifespan)
+# AJUSTE: redirect_slashes=True faz com que se a Twilio chamar /webhook/whatsapp/ 
+# o FastAPI trate internamente em vez de quebrar a requisição POST.
+app = FastAPI(lifespan=lifespan, redirect_slashes=True)
 
 origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 
@@ -30,17 +32,9 @@ app.add_middleware(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-@app.options("/{rest_of_path:path}")
-async def preflight_handler(request: Request, rest_of_path: str):
-    return Response(
-        status_code=200,
-        headers={
-            "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "Authorization, Content-Type",
-        }
-    )
+# REMOVIDO: O preflight_handler manual foi removido para evitar conflito de rotas.
 
+# Rotas do Sistema
 app.include_router(auth.router, prefix="/auth", tags=["Autenticação"])
 app.include_router(prescriptions.router, prefix="/prescriptions", tags=["Prescrições"])
 app.include_router(doses.router, prefix="/doses", tags=["Doses"])
