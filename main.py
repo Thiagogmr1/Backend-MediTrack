@@ -1,10 +1,9 @@
 import os
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from app.database import get_connection
 from app.routes import auth, prescriptions, doses, dashboard, patients, webhook
 from app.scheduler import start_scheduler
 from contextlib import asynccontextmanager
@@ -30,6 +29,17 @@ app.add_middleware(
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+@app.options("/{rest_of_path:path}")
+async def preflight_handler(request: Request, rest_of_path: str):
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type",
+        }
+    )
 
 app.include_router(auth.router, prefix="/auth", tags=["Autenticação"])
 app.include_router(prescriptions.router, prefix="/prescriptions", tags=["Prescrições"])
