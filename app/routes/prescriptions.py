@@ -63,8 +63,13 @@ def create_prescription(prescription: PrescriptionCreate, current_user: dict = D
                 schedule_id = cursor.fetchone()[0]
 
                 cursor.execute(
-                    """INSERT INTO doses (medication_id, schedule_id, scheduled_date)
-                    SELECT %s, %s, generate_series(%s::date, %s::date, '1 day'::interval)::date""",
+                    """INSERT INTO doses (medication_id, schedule_id, scheduled_date, status)
+                    SELECT %s, %s, d::date,
+                        CASE 
+                            WHEN d::date < CURRENT_DATE THEN 'missed'
+                            ELSE 'pending'
+                        END
+                    FROM generate_series(%s::date, %s::date, '1 day'::interval) d""",
                     (medication_id, schedule_id, med.start_date, med.end_date)
                 )
 

@@ -1,12 +1,13 @@
 import logging
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from app.database import get_connection
 from app.services.whatsapp import send_reminder
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
-scheduler = BackgroundScheduler()
+scheduler = BackgroundScheduler(timezone=ZoneInfo("America/Sao_Paulo"))
 
 def check_and_send_reminders():
     conn = get_connection()
@@ -14,13 +15,9 @@ def check_and_send_reminders():
 
     try:
         now = datetime.now(ZoneInfo("America/Sao_Paulo"))
-
-        # Usa a data de Brasília (evita bug após 21h quando Railway/Postgres já estão no dia seguinte em UTC)
         today = now.strftime("%Y-%m-%d")
-
-        # Janela no passado recente com tolerância de 2 minutos para atrasos do scheduler
         window_start = (now - timedelta(minutes=2)).strftime("%H:%M")
-        window_end   = now.strftime("%H:%M")
+        window_end = now.strftime("%H:%M")
 
         logger.info(f"[Scheduler] Horário: {now} — Janela: {window_start} a {window_end}")
 
@@ -65,7 +62,47 @@ def check_and_send_reminders():
         cursor.close()
         conn.close()
 
+
+def mark_missed_doses():
+    """Roda à meia-noite e marca como missed todas as doses pending do dia anterior."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        now = datetime.now(ZoneInfo("America/Sao_Paulo"))
+        yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        logger.info(f"[Scheduler] Marcando doses perdidas do dia {yesterday}")
+
+        cursor.execute("""
+            UPDATE doses
+            SET status = 'missed'
+            WHERE scheduled_date = %s
+            AND status = 'pending'
+        """, (yesterday,))
+
+        missed_count = cursor.rowcount
+        conn.commit()
+
+        logger.info(f"[Scheduler] {missed_count} doses marcadas como missed")
+
+    except Exception as e:
+        logger.error(f"[Scheduler] Erro ao marcar doses perdidas: {e}")
+        conn.rollback()
+    finally:
+        cursor.close()
+        conn.close()
+
+
 def start_scheduler():
+    # Job de lembretes — roda a cada minuto
     scheduler.add_job(check_and_send_reminders, "interval", minutes=1)
+
+    # Job de meia-noite — marca doses perdidas do dia anterior
+    scheduler.add_job(
+        mark_missed_doses,
+        CronTrigger(hour=0, minute=1, timezone=ZoneInfo("America/Sao_Paulo"))
+    )
+
     scheduler.start()
     logger.info("[Scheduler] Agendador iniciado!")
