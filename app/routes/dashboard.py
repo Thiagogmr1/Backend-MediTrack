@@ -1,7 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from app.auth import get_current_user, require_role
 from app.database import get_connection
-from datetime import date
 
 router = APIRouter()
 
@@ -26,16 +25,14 @@ def get_dashboard_overview(doctor_id: int, current_user: dict = Depends(require_
                 u.name,
                 DATE_PART('year', AGE(u.birth_date)) AS age,
                 COUNT(DISTINCT m.id) AS active_medications,
-                COUNT(d.id) FILTER (WHERE d.status IN ('taken', 'missed')) AS total_doses,
-                COUNT(d.id) FILTER (WHERE d.status = 'taken') AS taken_doses,
-                ROUND(
-                    COUNT(d.id) FILTER (WHERE d.status = 'taken') * 100.0 /
-                    NULLIF(COUNT(d.id) FILTER (WHERE d.status IN ('taken', 'missed')), 0)
-                , 2) AS adherence
+                COUNT(d.id) AS total_doses,
+                COUNT(dl.id) AS taken_doses,
+                ROUND(COUNT(dl.id) * 100.0 / NULLIF(COUNT(d.id), 0), 2) AS adherence
             FROM prescriptions p
             JOIN users u ON u.id = p.patient_id
             JOIN medications m ON m.prescription_id = p.id
             JOIN doses d ON d.medication_id = m.id
+            LEFT JOIN dose_logs dl ON dl.dose_id = d.id AND dl.patient_id = u.id
             WHERE p.doctor_id = %s
             GROUP BY u.id, u.name, u.birth_date
         """, (doctor_id,))
@@ -47,7 +44,7 @@ def get_dashboard_overview(doctor_id: int, current_user: dict = Depends(require_
         total_adherence = 0
 
         for row in rows:
-            adherence = float(row[6]) if row[6] is not None else 100.0
+            adherence = float(row[6]) if row[6] else 0
             total_adherence += adherence
             if adherence >= 80:
                 high_adherence += 1
@@ -92,9 +89,11 @@ def get_patient_dashboard(patient_id: int, current_user: dict = Depends(get_curr
     conn = get_connection()
     cursor = conn.cursor()
     try:
+        # Paciente só acessa os próprios dados
         if role == "patient" and user_id != patient_id:
             raise HTTPException(status_code=403, detail="Acesso negado")
 
+        # Médico só acessa pacientes vinculados a ele
         if role == "doctor":
             cursor.execute("""
                 SELECT 1 FROM doctor_patients
@@ -103,15 +102,11 @@ def get_patient_dashboard(patient_id: int, current_user: dict = Depends(get_curr
             if not cursor.fetchone():
                 raise HTTPException(status_code=403, detail="Acesso negado")
 
-        # Adesão geral — apenas doses taken ou missed (excluindo pending)
         cursor.execute("""
             SELECT
-                COUNT(d.id) FILTER (WHERE d.status IN ('taken', 'missed')) AS total_doses,
-                COUNT(d.id) FILTER (WHERE d.status = 'taken') AS taken_doses,
-                ROUND(
-                    COUNT(d.id) FILTER (WHERE d.status = 'taken') * 100.0 /
-                    NULLIF(COUNT(d.id) FILTER (WHERE d.status IN ('taken', 'missed')), 0)
-                , 2) AS adherence,
+                COUNT(d.id) AS total_doses,
+                COUNT(dl.id) AS taken_doses,
+                ROUND(COUNT(dl.id) * 100.0 / NULLIF(COUNT(d.id), 0), 2) AS adherence,
                 u.name,
                 u.phone,
                 DATE_PART('year', AGE(u.birth_date)) AS age
@@ -119,111 +114,66 @@ def get_patient_dashboard(patient_id: int, current_user: dict = Depends(get_curr
             JOIN medications m ON m.id = d.medication_id
             JOIN prescriptions p ON p.id = m.prescription_id
             JOIN users u ON u.id = p.patient_id
+            LEFT JOIN dose_logs dl ON dl.dose_id = d.id AND dl.patient_id = %s
             WHERE p.patient_id = %s
             GROUP BY u.name, u.phone, u.birth_date
-        """, (patient_id,))
+        """, (patient_id, patient_id))
         general = cursor.fetchone()
 
-        if not general or general[0] == 0:
-            cursor.execute("""
-                SELECT u.name, u.phone, DATE_PART('year', AGE(u.birth_date))
-                FROM users u WHERE u.id = %s
-            """, (patient_id,))
-            user_row = cursor.fetchone()
-            return {
-                "patient_name": user_row[0] if user_row else "",
-                "patient_phone": user_row[1] if user_row else None,
-                "patient_age": int(user_row[2]) if user_row and user_row[2] else None,
-                "total_doses": 0,
-                "taken_doses": 0,
-                "general_adherence": 0.0,
-                "missed_doses": 0,
-                "consecutive_days": 0,
-                "daily_adherence": [],
-                "weekly_adherence": []
-            }
+        if not general:
+            raise HTTPException(status_code=404, detail="Paciente sem dados de adesão")
 
         missed_doses = general[0] - general[1]
 
-        # Adesão diária — usa status para determinar cor do calendário
         cursor.execute("""
             SELECT
                 d.scheduled_date,
                 COUNT(d.id) AS total_doses,
-                COUNT(d.id) FILTER (WHERE d.status = 'taken') AS taken_doses,
-                COUNT(d.id) FILTER (WHERE d.status = 'missed') AS missed_doses,
-                ROUND(
-                    COUNT(d.id) FILTER (WHERE d.status = 'taken') * 100.0 /
-                    NULLIF(COUNT(d.id) FILTER (WHERE d.status IN ('taken', 'missed')), 0)
-                , 2) AS adherence
+                COUNT(dl.id) AS taken_doses,
+                ROUND(COUNT(dl.id) * 100.0 / NULLIF(COUNT(d.id), 0), 2) AS adherence
             FROM doses d
             JOIN medications m ON m.id = d.medication_id
             JOIN prescriptions p ON p.id = m.prescription_id
+            LEFT JOIN dose_logs dl ON dl.dose_id = d.id AND dl.patient_id = %s
             WHERE p.patient_id = %s
             AND d.scheduled_date >= CURRENT_DATE - INTERVAL '30 days'
             AND d.scheduled_date <= CURRENT_DATE
             GROUP BY d.scheduled_date
             ORDER BY d.scheduled_date
-        """, (patient_id,))
+        """, (patient_id, patient_id))
         daily_rows = cursor.fetchall()
 
         daily_adherence = []
         consecutive_days = 0
         for row in daily_rows:
-            scheduled_date = row[0]
-            total = int(row[1])
-            taken = int(row[2])
-            missed = int(row[3])
-            is_today = scheduled_date == date.today()
-
-            if is_today:
-                # Hoje: verde se tomou alguma, neutro se ainda pending
-                if taken == total:
-                    adherence_val = 100.0
-                elif taken > 0:
-                    adherence_val = round(taken * 100.0 / total, 2)
-                else:
-                    adherence_val = -1  # neutro — ainda no prazo
-            else:
-                # Dias anteriores — usa status real
-                if missed == 0 and taken == 0:
-                    adherence_val = -1  # sem dados
-                elif missed == 0:
-                    adherence_val = 100.0
-                else:
-                    adherence_val = float(row[4]) if row[4] else 0.0
-
-            if adherence_val == 100:
+            adherence = float(row[3]) if row[3] else 0
+            if adherence == 100:
                 consecutive_days += 1
-            elif adherence_val != -1:
+            else:
                 consecutive_days = 0
-
             daily_adherence.append({
-                "date": str(scheduled_date),
-                "total_doses": total,
-                "taken_doses": taken,
-                "adherence": adherence_val
+                "date": str(row[0]),
+                "total_doses": row[1],
+                "taken_doses": row[2],
+                "adherence": adherence
             })
 
-        # Adesão semanal — usa status
         cursor.execute("""
             SELECT
                 DATE_TRUNC('week', d.scheduled_date) AS week,
-                COUNT(d.id) FILTER (WHERE d.status IN ('taken', 'missed')) AS total_doses,
-                COUNT(d.id) FILTER (WHERE d.status = 'taken') AS taken_doses,
-                ROUND(
-                    COUNT(d.id) FILTER (WHERE d.status = 'taken') * 100.0 /
-                    NULLIF(COUNT(d.id) FILTER (WHERE d.status IN ('taken', 'missed')), 0)
-                , 2) AS adherence
+                COUNT(d.id) AS total_doses,
+                COUNT(dl.id) AS taken_doses,
+                ROUND(COUNT(dl.id) * 100.0 / NULLIF(COUNT(d.id), 0), 2) AS adherence
             FROM doses d
             JOIN medications m ON m.id = d.medication_id
             JOIN prescriptions p ON p.id = m.prescription_id
+            LEFT JOIN dose_logs dl ON dl.dose_id = d.id AND dl.patient_id = %s
             WHERE p.patient_id = %s
             AND d.scheduled_date >= CURRENT_DATE - INTERVAL '30 days'
             AND d.scheduled_date <= CURRENT_DATE
             GROUP BY week
             ORDER BY week
-        """, (patient_id,))
+        """, (patient_id, patient_id))
         weekly_rows = cursor.fetchall()
 
         weekly_adherence = [

@@ -12,6 +12,7 @@ def validate_twilio_request(request: Request, form_data: dict) -> bool:
     validator = RequestValidator(auth_token)
     signature = request.headers.get("X-Twilio-Signature", "")
 
+    # Corrige http → https para funcionar atrás do proxy do Railway
     url = str(request.url)
     if url.startswith("http://"):
         url = url.replace("http://", "https://", 1)
@@ -20,10 +21,11 @@ def validate_twilio_request(request: Request, form_data: dict) -> bool:
 
 @router.post("/whatsapp")
 async def whatsapp_webhook(request: Request):
-    logger.info("[Webhook] POST recebido")
+    logger.info("[Webhook] POST recebido")  # log antes de qualquer validação
 
     form_data = await request.form()
 
+    # Valida se a requisição veio da Twilio
     if not validate_twilio_request(request, dict(form_data)):
         logger.warning("[Webhook] Requisição inválida — não veio da Twilio")
         raise HTTPException(status_code=403, detail="Requisição inválida")
@@ -56,7 +58,6 @@ async def whatsapp_webhook(request: Request):
             LEFT JOIN dose_logs dl ON dl.dose_id = d.id AND dl.patient_id = u.id
             WHERE d.scheduled_date = CURRENT_DATE
             AND dl.id IS NULL
-            AND d.status = 'pending'
             AND REGEXP_REPLACE(u.phone, '[^0-9]', '', 'g') = REGEXP_REPLACE(%s, '[^0-9]', '', 'g')
             ORDER BY (
                 SELECT ms.scheduled_time
@@ -88,13 +89,9 @@ async def whatsapp_webhook(request: Request):
             "INSERT INTO dose_logs (dose_id, patient_id) VALUES (%s, %s)",
             (dose_id, patient_id)
         )
-        cursor.execute(
-            "UPDATE doses SET status = 'taken' WHERE id = %s",
-            (dose_id,)
-        )
         conn.commit()
 
-        logger.info(f"[Webhook] Dose {dose_id} registrada como taken para paciente {patient_id}")
+        logger.info(f"[Webhook] Dose {dose_id} registrada para paciente {patient_id}")
         return {"status": "success"}
 
     except Exception as e:
