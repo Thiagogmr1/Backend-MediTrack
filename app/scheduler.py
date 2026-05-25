@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.database import get_connection
 from app.services.whatsapp import send_reminder
@@ -14,15 +14,10 @@ def check_and_send_reminders():
 
     try:
         now = datetime.now(ZoneInfo("America/Sao_Paulo"))
-
-        # Usa a data de Brasília (evita bug após 21h quando Railway/Postgres já estão no dia seguinte em UTC)
         today = now.strftime("%Y-%m-%d")
+        current_time = now.strftime("%H:%M")
 
-        # Janela no passado recente com tolerância de 2 minutos para atrasos do scheduler
-        window_start = (now - timedelta(minutes=2)).strftime("%H:%M")
-        window_end   = now.strftime("%H:%M")
-
-        logger.info(f"[Scheduler] Horário: {now} — Janela: {window_start} a {window_end}")
+        logger.info(f"[Scheduler] Horário: {now} — Buscando doses até {current_time}")
 
         cursor.execute("""
             SELECT
@@ -38,9 +33,9 @@ def check_and_send_reminders():
             JOIN users u ON u.id = p.patient_id
             WHERE d.scheduled_date = %s
             AND d.reminder_sent = FALSE
-            AND TO_CHAR(ms.scheduled_time, 'HH24:MI') BETWEEN %s AND %s
+            AND TO_CHAR(ms.scheduled_time, 'HH24:MI') <= %s
             AND u.phone IS NOT NULL
-        """, (today, window_start, window_end))
+        """, (today, current_time))
 
         rows = cursor.fetchall()
         logger.info(f"[Scheduler] Doses encontradas: {len(rows)}")
