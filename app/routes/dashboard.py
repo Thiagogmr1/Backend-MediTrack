@@ -13,8 +13,8 @@ def get_dashboard_overview(doctor_id: int, current_user: dict = Depends(require_
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            SELECT COUNT(DISTINCT patient_id) 
-            FROM prescriptions 
+            SELECT COUNT(DISTINCT patient_id)
+            FROM prescriptions
             WHERE doctor_id = %s
         """, (doctor_id,))
         total_patients = cursor.fetchone()[0]
@@ -34,6 +34,7 @@ def get_dashboard_overview(doctor_id: int, current_user: dict = Depends(require_
             JOIN doses d ON d.medication_id = m.id
             LEFT JOIN dose_logs dl ON dl.dose_id = d.id AND dl.patient_id = u.id
             WHERE p.doctor_id = %s
+            AND d.status != 'cancelled'
             GROUP BY u.id, u.name, u.birth_date
         """, (doctor_id,))
 
@@ -89,11 +90,9 @@ def get_patient_dashboard(patient_id: int, current_user: dict = Depends(get_curr
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        # Paciente só acessa os próprios dados
         if role == "patient" and user_id != patient_id:
             raise HTTPException(status_code=403, detail="Acesso negado")
 
-        # Médico só acessa pacientes vinculados a ele
         if role == "doctor":
             cursor.execute("""
                 SELECT 1 FROM doctor_patients
@@ -116,6 +115,7 @@ def get_patient_dashboard(patient_id: int, current_user: dict = Depends(get_curr
             JOIN users u ON u.id = p.patient_id
             LEFT JOIN dose_logs dl ON dl.dose_id = d.id AND dl.patient_id = %s
             WHERE p.patient_id = %s
+            AND d.status != 'cancelled'
             GROUP BY u.name, u.phone, u.birth_date
         """, (patient_id, patient_id))
         general = cursor.fetchone()
@@ -136,6 +136,7 @@ def get_patient_dashboard(patient_id: int, current_user: dict = Depends(get_curr
             JOIN prescriptions p ON p.id = m.prescription_id
             LEFT JOIN dose_logs dl ON dl.dose_id = d.id AND dl.patient_id = %s
             WHERE p.patient_id = %s
+            AND d.status != 'cancelled'
             AND d.scheduled_date >= CURRENT_DATE - INTERVAL '30 days'
             AND d.scheduled_date <= CURRENT_DATE
             GROUP BY d.scheduled_date
@@ -169,6 +170,7 @@ def get_patient_dashboard(patient_id: int, current_user: dict = Depends(get_curr
             JOIN prescriptions p ON p.id = m.prescription_id
             LEFT JOIN dose_logs dl ON dl.dose_id = d.id AND dl.patient_id = %s
             WHERE p.patient_id = %s
+            AND d.status != 'cancelled'
             AND d.scheduled_date >= CURRENT_DATE - INTERVAL '30 days'
             AND d.scheduled_date <= CURRENT_DATE
             GROUP BY week

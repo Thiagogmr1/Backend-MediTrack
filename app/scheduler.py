@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.database import get_connection
 from app.services.whatsapp import send_reminder
@@ -13,8 +13,8 @@ def check_and_send_reminders():
 
     try:
         now = datetime.now()
-        window_start = (now + timedelta(minutes=1)).strftime("%H:%M")
-        window_end = (now + timedelta(minutes=2)).strftime("%H:%M")
+        window_start = now.strftime("%H:%M")
+        window_end = (now + timedelta(minutes=1)).strftime("%H:%M")
         logger.info(f"[Scheduler] Horário: {now} — Janela: {window_start} a {window_end}")
 
         cursor.execute("""
@@ -31,6 +31,9 @@ def check_and_send_reminders():
             JOIN users u ON u.id = p.patient_id
             WHERE d.scheduled_date = CURRENT_DATE
             AND d.reminder_sent = FALSE
+            AND d.status = 'pending'
+            AND m.status = 'active'
+            AND p.status = 'active'
             AND TO_CHAR(ms.scheduled_time, 'HH24:MI') BETWEEN %s AND %s
             AND u.phone IS NOT NULL
         """, (window_start, window_end))
