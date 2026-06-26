@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, validator
 from typing import List, Optional
+from datetime import datetime
 from app.database import get_connection
 from app.auth import require_role, get_current_user
 
@@ -306,15 +307,14 @@ def update_prescription(prescription_id: int, data: PrescriptionUpdate, current_
 
                 # Atualiza horários se enviados
                 if med.schedules is not None:
-                    # Remove doses futuras não confirmadas antes de recriar schedules
+                    # Deleta todas as doses não confirmadas (sem dose_log)
                     cursor.execute("""
                         DELETE FROM doses
                         WHERE medication_id = %s
-                        AND scheduled_date > CURRENT_DATE
                         AND id NOT IN (SELECT dose_id FROM dose_logs)
                     """, (medication_id,))
 
-                    # Remove schedules antigos e recria
+                    # Agora pode deletar os schedules com segurança
                     cursor.execute("DELETE FROM medication_schedules WHERE medication_id = %s", (medication_id,))
 
                     # Busca start_date e end_date atualizados do medicamento
@@ -382,6 +382,93 @@ def suspend_prescription(prescription_id: int, current_user: dict = Depends(requ
 
         conn.commit()
         return {"message": "Prescrição suspensa com sucesso"}
+
+    except HTTPException:
+        raise
+    except Exception:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail="Erro interno do servidor")
+    finally:
+        cursor.close()
+        conn.close()
+
+# -------------------------
+# REACTIVATE PRESCRIPTION
+# -------------------------
+
+@router.patch("/{prescription_id}/reactivate")
+def reactivate_prescription(prescription_id: int, current_user: dict = Depends(require_role("doctor"))):
+    doctor_id = int(current_user.get("sub"))
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        # Valida ownership e que está suspensa
+        cursor.execute(
+            "SELECT id FROM prescriptions WHERE id = %s AND doctor_id = %s AND status = 'suspended'",
+            (prescription_id, doctor_id)
+        )
+        if not cursor.fetchone():
+            raise HTTPException(status_code=403, detail="Prescrição não encontrada ou não está suspensa")
+
+        # Reativa prescrição e medicamentos
+        cursor.execute(
+            "UPDATE prescriptions SET status = 'active' WHERE id = %s",
+            (prescription_id,)
+        )
+        cursor.execute(
+            "UPDATE medications SET status = 'active' WHERE prescription_id = %s AND status = 'suspended'",
+            (prescription_id,)
+        )
+
+        # Busca medicamentos para gerar novas doses a partir de hoje
+        cursor.execute("""
+            SELECT id, end_date, continuous_use
+            FROM medications
+            WHERE prescription_id = %s AND status = 'active'
+        """, (prescription_id,))
+        medications = cursor.fetchall()
+
+        today = datetime.now().date()
+
+        for med_row in medications:
+            medication_id = med_row[0]
+            end_date = med_row[1]
+            continuous_use = med_row[2]
+
+            # Ignora medicamentos com end_date já vencido
+            if not continuous_use and end_date and end_date < today:
+                continue
+
+            cursor.execute(
+                "SELECT id FROM medication_schedules WHERE medication_id = %s",
+                (medication_id,)
+            )
+            schedules = cursor.fetchall()
+
+            for schedule_row in schedules:
+                schedule_id = schedule_row[0]
+
+                # Remove doses cancelled a partir de hoje antes de recriar
+                cursor.execute("""
+                    DELETE FROM doses
+                    WHERE medication_id = %s
+                    AND schedule_id = %s
+                    AND scheduled_date >= %s
+                    AND status = 'cancelled'
+                """, (medication_id, schedule_id, today))
+
+                _generate_doses(
+                    cursor,
+                    medication_id,
+                    schedule_id,
+                    str(today),
+                    str(end_date) if end_date else None,
+                    continuous_use
+                )
+
+        conn.commit()
+        return {"message": "Prescrição reativada com sucesso"}
 
     except HTTPException:
         raise
