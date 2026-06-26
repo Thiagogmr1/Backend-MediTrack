@@ -449,13 +449,13 @@ def reactivate_prescription(prescription_id: int, current_user: dict = Depends(r
             for schedule_row in schedules:
                 schedule_id = schedule_row[0]
 
-                # Remove doses cancelled a partir de hoje antes de recriar
+                # Remove todas as doses não confirmadas a partir de hoje (cancelled e pending)
                 cursor.execute("""
                     DELETE FROM doses
                     WHERE medication_id = %s
                     AND schedule_id = %s
                     AND scheduled_date >= %s
-                    AND status = 'cancelled'
+                    AND id NOT IN (SELECT dose_id FROM dose_logs)
                 """, (medication_id, schedule_id, today))
 
                 _generate_doses(
@@ -466,6 +466,21 @@ def reactivate_prescription(prescription_id: int, current_user: dict = Depends(r
                     str(end_date) if end_date else None,
                     continuous_use
                 )
+
+                # Cancela doses de hoje cujo horário já passou
+                cursor.execute("""
+                    UPDATE doses SET status = 'cancelled'
+                    WHERE medication_id = %s
+                    AND schedule_id = %s
+                    AND scheduled_date = %s
+                    AND status = 'pending'
+                    AND reminder_sent = FALSE
+                    AND (
+                        SELECT ms2.scheduled_time
+                        FROM medication_schedules ms2
+                        WHERE ms2.id = %s
+                    ) < CURRENT_TIME
+                """, (medication_id, schedule_id, today, schedule_id))
 
         conn.commit()
         return {"message": "Prescrição reativada com sucesso"}
