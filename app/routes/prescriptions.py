@@ -153,9 +153,14 @@ def list_prescriptions(doctor_id: int, patient_id: int, current_user: dict = Dep
                 p.notes,
                 p.status,
                 p.created_at,
-                COUNT(m.id) AS total_medications
+                COUNT(m.id) AS total_medications,
+                BOOL_OR(m.continuous_use) AS has_continuous,
+                MAX(m.end_date) AS latest_end_date,
+                MAX(ms.scheduled_time) AS latest_scheduled_time,
+                ARRAY_AGG(DISTINCT m.name ORDER BY m.name) AS medication_names
             FROM prescriptions p
             LEFT JOIN medications m ON m.prescription_id = p.id
+            LEFT JOIN medication_schedules ms ON ms.medication_id = m.id
             WHERE p.doctor_id = %s AND p.patient_id = %s
             GROUP BY p.id, p.notes, p.status, p.created_at
             ORDER BY p.created_at DESC
@@ -168,7 +173,11 @@ def list_prescriptions(doctor_id: int, patient_id: int, current_user: dict = Dep
                 "notes": row[1],
                 "status": row[2],
                 "created_at": str(row[3]),
-                "total_medications": row[4]
+                "total_medications": row[4],
+                "has_continuous": row[5],
+                "latest_end_date": str(row[6]) if row[6] else None,
+                "latest_scheduled_time": str(row[7]) if row[7] else None,
+                "medication_names": row[8] if row[8] else []
             }
             for row in rows
         ]
