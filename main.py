@@ -5,7 +5,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from app.database import get_connection
-from app.routes import auth, prescriptions, doses, dashboard, patients, webhook
+from app.routes import auth, prescriptions, doses, dashboard, patients, webhook, medications
 from app.scheduler import start_scheduler
 from contextlib import asynccontextmanager
 
@@ -36,3 +36,4 @@ app.include_router(doses.router, prefix="/doses", tags=["Doses"])
 app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
 app.include_router(patients.router, prefix="/patients", tags=["Pacientes"])
 app.include_router(webhook.router, prefix="/webhook", tags=["Webhook"])
+app.include_router(medications.router, prefix="/medications", tags=["Medicamentos"])
