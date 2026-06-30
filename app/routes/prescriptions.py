@@ -538,7 +538,10 @@ def delete_prescription(prescription_id: int, current_user: dict = Depends(requi
             WHERE medication_id IN (
                 SELECT id FROM medications WHERE prescription_id = %s
             )
-            AND scheduled_date > CURRENT_DATE
+                        AND (
+                scheduled_date > CURRENT_DATE
+                OR (scheduled_date = CURRENT_DATE AND reminder_sent = FALSE)
+            )
             AND id NOT IN (SELECT dose_id FROM dose_logs)
         """, (prescription_id,))
 
