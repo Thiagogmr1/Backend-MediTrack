@@ -35,6 +35,7 @@ def get_dashboard_overview(doctor_id: int, current_user: dict = Depends(require_
             LEFT JOIN dose_logs dl ON dl.dose_id = d.id AND dl.patient_id = u.id
             WHERE p.doctor_id = %s
             AND d.status != 'cancelled'
+            AND d.scheduled_date <= CURRENT_DATE
             GROUP BY u.id, u.name, u.birth_date
         """, (doctor_id,))
 
@@ -116,6 +117,7 @@ def get_patient_dashboard(patient_id: int, current_user: dict = Depends(get_curr
             LEFT JOIN dose_logs dl ON dl.dose_id = d.id AND dl.patient_id = %s
             WHERE p.patient_id = %s
             AND d.status != 'cancelled'
+            AND d.scheduled_date <= CURRENT_DATE
             GROUP BY u.name, u.phone, u.birth_date
         """, (patient_id, patient_id))
         general = cursor.fetchone()
@@ -188,6 +190,39 @@ def get_patient_dashboard(patient_id: int, current_user: dict = Depends(get_curr
             for row in weekly_rows
         ]
 
+        cursor.execute("""
+            SELECT
+                m.id AS medication_id,
+                m.name,
+                ms.scheduled_time,
+                COUNT(d.id) AS total_doses,
+                COUNT(dl.id) AS taken_doses,
+                ROUND(COUNT(dl.id) * 100.0 / NULLIF(COUNT(d.id), 0), 2) AS adherence
+            FROM doses d
+            JOIN medications m ON m.id = d.medication_id
+            JOIN medication_schedules ms ON ms.id = d.schedule_id
+            JOIN prescriptions p ON p.id = m.prescription_id
+            LEFT JOIN dose_logs dl ON dl.dose_id = d.id AND dl.patient_id = %s
+            WHERE p.patient_id = %s
+            AND d.status != 'cancelled'
+            AND d.scheduled_date <= CURRENT_DATE
+            GROUP BY m.id, m.name, ms.scheduled_time
+            ORDER BY adherence ASC NULLS LAST
+        """, (patient_id, patient_id))
+        medication_rows = cursor.fetchall()
+
+        medication_adherence = [
+            {
+                "medication_id": row[0],
+                "name": row[1],
+                "scheduled_time": str(row[2]),
+                "total_doses": row[3],
+                "taken_doses": row[4],
+                "adherence": float(row[5]) if row[5] else 0
+            }
+            for row in medication_rows
+        ]
+
         return {
             "patient_name": general[3],
             "patient_phone": general[4],
@@ -198,7 +233,8 @@ def get_patient_dashboard(patient_id: int, current_user: dict = Depends(get_curr
             "missed_doses": missed_doses,
             "consecutive_days": consecutive_days,
             "daily_adherence": daily_adherence,
-            "weekly_adherence": weekly_adherence
+            "weekly_adherence": weekly_adherence,
+            "medication_adherence": medication_adherence
         }
 
     except HTTPException:
