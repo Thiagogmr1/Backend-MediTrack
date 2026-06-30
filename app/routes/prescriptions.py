@@ -4,6 +4,8 @@ from typing import List, Optional
 from datetime import datetime
 from app.database import get_connection
 from app.auth import require_role, get_current_user
+import logging
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -22,6 +24,7 @@ class MedicationCreate(BaseModel):
     start_date: str
     end_date: Optional[str] = None
     continuous_use: bool = False
+    weekly: bool = False
     frequency: Optional[str] = None
     schedules: List[MedicationSchedule]
 
@@ -32,7 +35,7 @@ class MedicationCreate(BaseModel):
         if values.get("continuous_use"):
             return None
         return v
-
+    
 class PrescriptionCreate(BaseModel):
     doctor_id: int
     patient_id: int
@@ -47,6 +50,7 @@ class MedicationUpdate(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     continuous_use: Optional[bool] = None
+    weekly: Optional[bool] = None
     frequency: Optional[str] = None
     schedules: Optional[List[MedicationSchedule]] = None
 
@@ -60,18 +64,20 @@ class PrescriptionUpdate(BaseModel):
 
 CONTINUOUS_USE_DAYS = 90
 
-def _generate_doses(cursor, medication_id: int, schedule_id: int, start_date: str, end_date: Optional[str], continuous_use: bool):
-    """Gera doses para um schedule. Uso contínuo gera janela de 90 dias."""
+def _generate_doses(cursor, medication_id: int, schedule_id: int, start_date: str, end_date: Optional[str], continuous_use: bool, weekly: bool = False):
+    logger.info(f"[Doses] weekly={weekly}, continuous_use={continuous_use}, interval={'7 days' if weekly else '1 day'}")
+    interval = '7 days' if weekly else '1 day'
+    
     if continuous_use or end_date is None:
         cursor.execute(
-            """INSERT INTO doses (medication_id, schedule_id, scheduled_date)
-            SELECT %s, %s, generate_series(%s::date, %s::date + INTERVAL '%s days', '1 day'::interval)::date""",
+            f"""INSERT INTO doses (medication_id, schedule_id, scheduled_date)
+            SELECT %s, %s, generate_series(%s::date, %s::date + INTERVAL '%s days', '{interval}'::interval)::date""",
             (medication_id, schedule_id, start_date, start_date, CONTINUOUS_USE_DAYS)
         )
     else:
         cursor.execute(
-            """INSERT INTO doses (medication_id, schedule_id, scheduled_date)
-            SELECT %s, %s, generate_series(%s::date, %s::date, '1 day'::interval)::date""",
+            f"""INSERT INTO doses (medication_id, schedule_id, scheduled_date)
+            SELECT %s, %s, generate_series(%s::date, %s::date, '{interval}'::interval)::date""",
             (medication_id, schedule_id, start_date, end_date)
         )
 
@@ -105,12 +111,12 @@ def create_prescription(prescription: PrescriptionCreate, current_user: dict = D
         for med in prescription.medications:
             cursor.execute(
                 """INSERT INTO medications
-                (prescription_id, name, dosage, indication, notes, start_date, end_date, continuous_use, frequency)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                (prescription_id, name, dosage, indication, notes, start_date, end_date, continuous_use, weekly, frequency)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
                 (
                     prescription_id, med.name, med.dosage, med.indication,
                     med.notes, med.start_date, med.end_date,
-                    med.continuous_use, med.frequency
+                    med.continuous_use, med.weekly, med.frequency
                 )
             )
             medication_id = cursor.fetchone()[0]
@@ -121,8 +127,7 @@ def create_prescription(prescription: PrescriptionCreate, current_user: dict = D
                     (medication_id, schedule.scheduled_time)
                 )
                 schedule_id = cursor.fetchone()[0]
-                _generate_doses(cursor, medication_id, schedule_id, med.start_date, med.end_date, med.continuous_use)
-
+                _generate_doses(cursor, medication_id, schedule_id, med.start_date, med.end_date, med.continuous_use, med.weekly)
         conn.commit()
         return {"message": "Prescrição criada com sucesso", "prescription_id": prescription_id}
 
@@ -301,7 +306,7 @@ def update_prescription(prescription_id: int, data: PrescriptionUpdate, current_
                 # Monta update dinâmico apenas com campos enviados
                 fields = []
                 values = []
-                for field in ["name", "dosage", "indication", "notes", "start_date", "end_date", "continuous_use", "frequency"]:
+                for field in ["name", "dosage", "indication", "notes", "start_date", "end_date", "continuous_use", "weekly", "frequency"]:
                     val = getattr(med, field)
                     if val is not None:
                         fields.append(f"{field} = %s")
@@ -328,13 +333,14 @@ def update_prescription(prescription_id: int, data: PrescriptionUpdate, current_
 
                     # Busca start_date e end_date atualizados do medicamento
                     cursor.execute(
-                        "SELECT start_date, end_date, continuous_use FROM medications WHERE id = %s",
+                         "SELECT start_date, end_date, continuous_use, weekly FROM medications WHERE id = %s",
                         (medication_id,)
                     )
                     med_row = cursor.fetchone()
                     start_date = str(med_row[0])
                     end_date = str(med_row[1]) if med_row[1] else None
                     continuous_use = med_row[2]
+                    weekly = med_row[3]
 
                     for schedule in med.schedules:
                         cursor.execute(
@@ -342,7 +348,7 @@ def update_prescription(prescription_id: int, data: PrescriptionUpdate, current_
                             (medication_id, schedule.scheduled_time)
                         )
                         schedule_id = cursor.fetchone()[0]
-                        _generate_doses(cursor, medication_id, schedule_id, start_date, end_date, continuous_use)
+                        _generate_doses(cursor, medication_id, schedule_id, start_date, end_date, continuous_use, weekly)
 
         conn.commit()
         return {"message": "Prescrição atualizada com sucesso"}
