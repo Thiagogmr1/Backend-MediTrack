@@ -35,6 +35,7 @@ def get_dashboard_overview(doctor_id: int, current_user: dict = Depends(require_
             LEFT JOIN dose_logs dl ON dl.dose_id = d.id AND dl.patient_id = u.id
             WHERE p.doctor_id = %s
             AND d.status != 'cancelled'
+            AND d.scheduled_date <= CURRENT_DATE
             GROUP BY u.id, u.name, u.birth_date
         """, (doctor_id,))
 
@@ -116,6 +117,7 @@ def get_patient_dashboard(patient_id: int, current_user: dict = Depends(get_curr
             LEFT JOIN dose_logs dl ON dl.dose_id = d.id AND dl.patient_id = %s
             WHERE p.patient_id = %s
             AND d.status != 'cancelled'
+            AND d.scheduled_date <= CURRENT_DATE
             GROUP BY u.name, u.phone, u.birth_date
         """, (patient_id, patient_id))
         general = cursor.fetchone()
