@@ -3,6 +3,7 @@ import os
 from fastapi import APIRouter, Request, HTTPException
 from twilio.request_validator import RequestValidator
 from app.database import get_connection
+import requests
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -18,6 +19,66 @@ def validate_twilio_request(request: Request, form_data: dict) -> bool:
         url = url.replace("http://", "https://", 1)
 
     return validator.validate(url, dict(form_data), signature)
+
+def enviar_template_whatsapp(phone: str, content_sid: str) -> bool:
+    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+    sender = os.getenv("TWILIO_WHATSAPP_NUMBER")  # confira o nome da variável no seu projeto
+
+    if not content_sid:
+        logger.error("[Pausa] SID do template de avaliação não configurado")
+        return False
+
+    try:
+        r = requests.post(
+            f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json",
+            auth=(account_sid, auth_token),
+            data={
+                "From": sender,
+                "To": f"whatsapp:+55{phone}",
+                "ContentSid": content_sid,
+            },
+            timeout=15,
+        )
+        if r.status_code not in (200, 201):
+            logger.error(f"[Pausa] Erro ao enviar template: {r.status_code} {r.text[:200]}")
+            return False
+        return True
+    except Exception as e:
+        logger.error(f"[Pausa] Falha no envio do template: {e}")
+        return False
+
+
+def registrar_resposta_pausa(phone: str, button_payload: str) -> dict:
+    quer_receber = button_payload == "continuar_sim"
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            UPDATE users
+            SET quer_receber = %s, respondeu_pausa_em = NOW()
+            WHERE role = 'patient'
+              AND respondeu_pausa_em IS NULL
+              AND REGEXP_REPLACE(phone, '[^0-9]', '', 'g') = REGEXP_REPLACE(%s, '[^0-9]', '', 'g')
+        """, (quer_receber, phone))
+        primeira_vez = cursor.rowcount > 0
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"[Pausa] Erro ao gravar resposta: {e}")
+        return {"status": "error"}
+    finally:
+        cursor.close()
+        conn.close()
+
+    if not primeira_vez:
+        logger.info(f"[Pausa] {phone}: sem paciente pendente (já respondeu ou não encontrado)")
+        return {"status": "already_answered_or_not_found"}
+
+    logger.info(f"[Pausa] {phone}: quer_receber={quer_receber}")
+    enviar_template_whatsapp(phone, os.getenv("TWILIO_TEMPLATE_AVALIACAO_SID"))
+    return {"status": "success"}
 
 @router.post("/whatsapp")
 async def whatsapp_webhook(request: Request):
@@ -40,6 +101,9 @@ async def whatsapp_webhook(request: Request):
     response_text = button_payload if button_payload else message
 
     logger.info(f"[Webhook] Telefone: {phone} | Mensagem: '{message}' | Payload: '{button_payload}'")
+    
+    if button_payload in ("continuar_sim", "continuar_nao"):
+        return registrar_resposta_pausa(phone, button_payload)
 
     if "tomei" not in response_text:
         logger.info(f"[Webhook] Resposta ignorada: {response_text}")
