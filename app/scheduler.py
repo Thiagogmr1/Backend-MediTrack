@@ -68,8 +68,8 @@ def check_and_send_reminders():
 
 def start_scheduler():
     if os.getenv("SCHEDULER_ENABLED", "true").lower() != "true":
-        logger.info("[Scheduler] Desativado (SCHEDULER_ENABLED != true). Lembretes não serão enviados.")
+        logger.warning("[Scheduler] DESATIVADO (SCHEDULER_ENABLED != true). Lembretes não serão enviados.")
         return
     scheduler.add_job(check_and_send_reminders, "interval", minutes=1)
     scheduler.start()
-    logger.info("[Scheduler] Agendador iniciado!")
+    logger.warning("[Scheduler] Agendador INICIADO!")
