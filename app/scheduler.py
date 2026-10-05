@@ -4,6 +4,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.database import get_connection
 from app.services.whatsapp import send_reminder
 from zoneinfo import ZoneInfo
+import os
 
 logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler()
@@ -60,7 +61,15 @@ def check_and_send_reminders():
         cursor.close()
         conn.close()
 
+# def start_scheduler():
+#     scheduler.add_job(check_and_send_reminders, "interval", minutes=1)
+#     scheduler.start()
+#     logger.info("[Scheduler] Agendador iniciado!")
+
 def start_scheduler():
+    if os.getenv("SCHEDULER_ENABLED", "true").lower() != "true":
+        logger.info("[Scheduler] Desativado (SCHEDULER_ENABLED != true). Lembretes não serão enviados.")
+        return
     scheduler.add_job(check_and_send_reminders, "interval", minutes=1)
     scheduler.start()
     logger.info("[Scheduler] Agendador iniciado!")
